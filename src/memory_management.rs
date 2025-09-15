@@ -165,3 +165,12 @@ pub unsafe fn protect_pages(
     }
     Ok(())
 }
+
+pub unsafe fn madvice_hugepage(
+    raw: *mut u8,
+    len: usize,
+) -> Result<(), EbpfError> {
+    #[cfg(not(target_os = "windows"))]
+    libc::madvise(raw.cast::<c_void>(), len, libc::MADV_HUGEPAGE);
+    Ok(())
+}
