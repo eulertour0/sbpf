@@ -61,6 +61,8 @@ pub struct JitProgram {
     page_size: usize,
     /// maybe huge page size in bytes and must be multiple of page_size
     huge_page_size: usize,
+    /// The page size used for the text_section
+    text_page_size: usize,
     /// Byte offset in the text_section for each BPF instruction
     pc_section: &'static mut [u32],
     /// The x86 machinecode
@@ -84,6 +86,7 @@ impl JitProgram {
             Ok(Self {
                 page_size,
                 huge_page_size,
+                text_page_size: huge_page_size,
                 pc_section: std::slice::from_raw_parts_mut(raw0.cast::<u32>(), pc),
                 text_section: std::slice::from_raw_parts_mut(raw1, over_allocated_code_size),
             })
@@ -99,7 +102,10 @@ impl JitProgram {
             round_to_page_size(std::mem::size_of_val(self.pc_section), self.page_size);
         let over_allocated_code_size =
             round_to_page_size(self.text_section.len(), self.huge_page_size);
-        let code_size = round_to_page_size(text_section_usage, self.huge_page_size);
+        if text_section_usage <= 128 * 1024 {
+            self.text_page_size = self.page_size;
+        }
+        let code_size = round_to_page_size(text_section_usage, self.text_page_size);
         unsafe {
             // Fill with debugger traps
             std::ptr::write_bytes(
@@ -190,7 +196,7 @@ impl JitProgram {
     pub fn mem_size(&self) -> usize {
         let pc_loc_table_size =
             round_to_page_size(std::mem::size_of_val(self.pc_section), self.page_size);
-        let code_size = round_to_page_size(self.text_section.len(), self.huge_page_size);
+        let code_size = round_to_page_size(self.text_section.len(), self.text_page_size);
         pc_loc_table_size + code_size
     }
 }
@@ -199,7 +205,7 @@ impl Drop for JitProgram {
     fn drop(&mut self) {
         let pc_loc_table_size =
             round_to_page_size(std::mem::size_of_val(self.pc_section), self.page_size);
-        let code_size = round_to_page_size(self.text_section.len(), self.huge_page_size);
+        let code_size = round_to_page_size(self.text_section.len(), self.text_page_size);
         if pc_loc_table_size > 0 {
             unsafe {
                 let _ = free_pages(self.pc_section.as_ptr() as *mut u8, pc_loc_table_size);
